@@ -1,0 +1,305 @@
+---
+title: "Team 6 RP#3 - Breast cancer Prediction"
+author: "Daniel Miao, Rylan Keniston, Neha Bhattacharyya, Allyssa Weinbrecht"
+date: "11/21/2020"
+output: word_document
+---
+
+
+## 1. Import Dataset
+```{r cars}
+# Import dataset and install packages
+library("tidyverse")
+library(readr)
+library(leaps)
+library(car)
+library(Ecdat)
+library(lmtest)
+library(psych)
+library(gridExtra)
+library(cowplot)
+source('https://tinyurl.com/y4krd9uy') # simple_anova function
+
+setwd('D:/Documents/UT Austin/Classes/SDS 358/Project')
+cancer<- read.csv("Cancer.csv")
+cancer<-na.omit(cancer)
+
+#clean the dataset, create a dummy variable for malignant=1, benign=0 response variable
+cancer <- cancer %>%
+  mutate(cancer, malignant=ifelse(diagnosis=='M',1,0))
+```
+
+## 2. Analysis of predictor relationships 
+
+```{r RP3.2}
+#Predictor correlation matrix
+pairs.panels((cancer)[c('radius_mean', 'texture_mean', 'perimeter_mean', 'area_mean', 'smoothness_mean', 'compactness_mean', 'concavity_mean' )],
+ method = "pearson", # correlation method
+ hist.col = "#00AFBB",
+ smooth = FALSE, density = FALSE, ellipses = FALSE)
+```
+
+We see that the predictors radius_mean, perimeter_mean, and area_mean are all very highly correlated with each other.
+The predictor smoothness_mean seems to be the least correlated with the other predictors. Because almost all the predictors except for smoothness and texture are measuring mostly similar properties of the cell, it would be reasonable that most of the predictors would be moderately correlated with each other.
+
+This should not be an issue when performing logistic regression, however.
+
+### 2.1 Univariate Analysis
+
+```{r RP3.2.1}
+#Histograms to examine spread of predictors
+hist1<- ggplot(data=cancer, aes(radius_mean)) + geom_histogram()
+hist2<- ggplot(data=cancer, aes(texture_mean)) + geom_histogram()
+hist3<- ggplot(data=cancer, aes(perimeter_mean)) + geom_histogram()
+hist4<- ggplot(data=cancer, aes(area_mean)) + geom_histogram()
+hist5<- ggplot(data=cancer, aes(smoothness_mean)) + geom_histogram()
+hist6<- ggplot(data=cancer, aes(compactness_mean)) + geom_histogram()
+hist7<- ggplot(data=cancer, aes(concavity_mean)) + geom_histogram()
+bar8<-  ggplot(data=cancer, aes(x=malignant)) + geom_bar()
+plot_grid(hist1,hist2,hist3,hist4,hist5,hist6,hist7,bar8, nrows=7,ncol=4,labels=NULL)
+```
+
+After briefly examining histograms of predictors by themselves, many of the predictors have medians closer to the left. The spread of the data is right skewed for almost all graphs besides smoothness, which stays symmetrical. 
+For the response variable, there are around 50% more benign breast cells in the data sample than malignant. 
+### 2.2.  Bivariate Analysis
+
+```{r RP3.2.2}
+# Comparing numerical variables with the response:
+  boxplot1 <- ggplot(cancer, aes(x=as.factor(malignant), y=radius_mean, fill=as.factor(malignant))) +
+    geom_boxplot(alpha=0.3) +
+    theme_classic() +
+    theme(legend.position="none") +
+    labs(title = "Radius",
+     x = "0=Ben, 1=Mal", y= "µm")
+  
+  boxplot2 <- ggplot(cancer, aes(x=as.factor(malignant), y=texture_mean, fill=as.factor(malignant))) +
+    geom_boxplot(alpha=0.3) +
+    theme_classic() +
+    theme(legend.position="none") +
+    labs(title = "Texture",
+     x = "0=Ben, 1=Mal", y= "stdev(grayscale)")
+  
+  boxplot3 <- ggplot(cancer, aes(x=as.factor(malignant), y=perimeter_mean, fill=as.factor(malignant))) +
+    geom_boxplot(alpha=0.3) +
+    theme_classic() +
+    theme(legend.position="none") +
+    labs(title = "Perimeter",
+     x = "0=Ben, 1=Mal", y= "µm")
+  
+  boxplot4 <- ggplot(cancer, aes(x=as.factor(malignant), y=area_mean, fill=as.factor(malignant))) +
+    geom_boxplot(alpha=0.3) +
+    theme_classic() +
+    theme(legend.position="none") +
+    labs(title = "Area",
+     x = "0=Ben,1=Mal", y= "µm^2")
+  
+  boxplot5 <- ggplot(cancer, aes(x=as.factor(malignant), y=smoothness_mean, fill=as.factor(malignant))) +
+    geom_boxplot(alpha=0.3) +
+    theme_classic() +
+    theme(legend.position="none") +
+    labs(title = "Smoothness",
+     x = "0=Ben,1=Mal", y= "Var(radius length)")
+  
+  boxplot6 <- ggplot(cancer, aes(x=as.factor(malignant), y=compactness_mean, fill=as.factor(malignant))) +
+    geom_boxplot(alpha=0.3) +
+    theme_classic() +
+    theme(legend.position="none") +
+    labs(title = "Compactness",
+     x = "0=Ben,1=Mal", y= "(perimter^2/area)-1")
+  
+  boxplot7 <- ggplot(cancer, aes(x=as.factor(malignant), y=concavity_mean, fill=as.factor(malignant))) +
+    geom_boxplot(alpha=0.3) +
+    theme_classic() +
+    theme(legend.position="none") +
+    labs(title = "Concavity",
+     x = "0=Ben,1=Mal", y= "Severity of contour")
+  
+plot_grid(boxplot1,boxplot2,boxplot3,boxplot4,boxplot5,boxplot6,boxplot7, nrow=2, ncol=4,labels=NULL)
+
+```
+
+From the boxplots, we see that there are large differences in the physical properties of benign vs malignant (Ben, Mal) breast tissue cells. In addition, the IQR and top quartile spread in malignant cells seem to be significantly greater than in benign cells. 
+The capacity for more extreme outliers seems to appear in malignant cells, but surprisingly texture and concavity have a large number of benign outliers as well. 
+
+From the boxplots it appears that the predictors texture and smoothness are not as significant in differentiating between the two diagnoses. To further examine the data, we should perform a regression analysis of an initial full model. 
+
+
+## 3. Building an Initial Linear Model
+```{r RP3.3}
+#Create a scatter plot of response values for radius values
+ggplot(cancer, aes(x=radius_mean, y=malignant, alpha=NA)) +
+  geom_jitter(height=.2) +
+  geom_smooth(method='lm', se = FALSE)
+
+lmlinear=lm(malignant~ radius_mean+ texture_mean+perimeter_mean+area_mean+smoothness_mean+compactness_mean+concavity_mean, data=cancer)
+
+ggplot(cancer, aes(x=, radius_mean+ texture_mean+perimeter_mean+area_mean+smoothness_mean+compactness_mean+concavity_mean, y=malignant)) +
+ geom_point(alpha=.1) +
+ geom_smooth(method=lm, se=FALSE, fullrange=TRUE) +
+ labs(title ="Relationship between malignant response and all predictors",
+ x = "Radius + Texture + Perimeter + Area + Smoothness + Compactness + Concavity", y = "Malignant (0=Ben, 1=Mal)")
+
+#Look at summary of data and R^2 improvement
+summary(lmlinear)
+```
+
+Examining the linear regression graph, it is quite obvious that a logistic graph would be better for the categorical response variable. Howver, the greater the combined value of the predictors, the more likely it seems to be that the cell is malignant. 
+
+
+## 4. Building Simple Logistic Models
+```{r RP3.4}
+# Represent the logistic regression model
+log1<-ggplot(cancer, aes(x=radius_mean, y=malignant)) +
+ geom_point(alpha = 0.1) +
+ geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) +
+ labs(title = "Radius",y= "0=Ben, 1=Mal", x= "µm")
+
+  log2 <- ggplot(cancer, aes(x=texture_mean, y=malignant)) +
+    geom_point(alpha=.1) +
+ geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) +
+    labs(title = "Texture",y = "0=Ben, 1=Mal", x= "stdev(grayscale)")
+  
+  log3 <- ggplot(cancer, aes( x=perimeter_mean, y=malignant)) +
+    geom_point(alpha=.1) +
+ geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) +
+    labs(title = "Perimeter",y = "0=Ben, 1=Mal", x= "µm")
+  
+  log4 <- ggplot(cancer, aes( x=area_mean,  y=malignant)) +
+    geom_point(alpha=.1) +
+ geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) +
+    labs(title = "Area",y = "0=Ben,1=Mal", x= "µm^2")
+  
+  log5 <- ggplot(cancer, aes(x=smoothness_mean, y=malignant)) +
+    geom_point(alpha=.1) +
+ geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) +
+    labs(title = "Smoothness",y = "0=Ben,1=Mal", x= "Var(radius length)")
+  
+  log6 <- ggplot(cancer, aes( x=compactness_mean,  y=malignant)) +
+    geom_point(alpha=.1) +
+ geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) +
+    labs(title = "Compactness", y = "0=Ben,1=Mal", x= "(perimeter^2/area)-1")
+  
+  log7 <- ggplot(cancer, aes( x=concavity_mean,  y=malignant)) +
+    geom_point(alpha=.1) +
+ geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) +
+    labs(title = "Concavity", y = "0=Ben,1=Mal", x= "Severity of contour")
+
+plot_grid(log1,log2,log3,log4,log5,log6,log7, nrow=2, ncol=4,labels=NULL)
+
+```
+
+
+## 5. Building a Full Logistic Model
+
+```{r RP3.5}
+# Full model with all predictors:
+log_full <- ggplot(cancer, aes(x=radius_mean+texture_mean+perimeter_mean+area_mean+smoothness_mean+compactness_mean+concavity_mean, y=malignant)) +
+geom_point(alpha=.1) +
+geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) +
+labs(title = "Full Logistic Model", y = "0=Ben,1=Mal", x= "Radius+Texture+Perimeter+Area+Smoothness+Compactness+Concavity")
+
+log_full
+
+reglog_full <- glm(malignant~ radius_mean+texture_mean+perimeter_mean+area_mean+smoothness_mean+compactness_mean+concavity_mean, family=binomial, cancer)
+
+# Summary table of the full model
+summary(reglog_full)
+
+# Interpretation of slope coefficients in terms of odds
+exp(coefficients(reglog_full))
+```
+
+The full regression illustrates the comprehensive graph combining all the simple logistic regression models. 
+
+
+The equation of this model is:
+log(π/(1-π)) = -24.3696 - 2.6048(radius) + 0.3857(texture) + 0.2462(perimeter) + 0.0692(area) + 136.1192(smoothness) - 14.4426(compactness) + 21.1783 (concavity)
+
+The most significant p values are from the predictors texture, smoothness, and concavity. 
+The odds are most significantly impacted by changes in texture, area, smoothness, and concavity, using a significance level of a=.15 for significance in logistic regression.
+The p values for these predictors are 0, .0692, 0, and .0004, respectively. 
+The exponent e raised to the slope of each predictor gives us the odds, which will enhance interpretability. 
+
+To interpret the odds, after holding all other predictors constant:
+
+A 1 µm increase in mean radius of breast cancer cell tissue decreases the odds of the cell being malignant by a factor of 2.6048.
+
+A 1 stdev(grayscale) increase in mean texture increases the odds of the cell being malignant by a factor of 0.3857.
+
+A 1 µm increase in mean perimeter length increases the odds of the cell being malignant by a factor of 0.2462.
+
+A 1 µm^2 increase in mean area of the cell increases the odds of the cell being malignant by a factor of 0.0692.
+
+A 1 var(radius length) increase in mean smoothness variance increases the odds of the cell being malignant by a factor of 136.1192.
+
+A 1 ((perimeter^2/area)-1) increase in mean compactness decreases the odds of the cell being malignant by a factor of 14.4426. 
+
+A 1 severity of contour increase in mean concavity increases the odds of the cell being malignant by a factor of 21.1783.
+
+
+
+Now to examine an improved model.
+
+
+## 6. Building an Improved Logistic Model
+```{r RP3.6}
+# Full model with all predictors:
+log_improved <- ggplot(cancer, aes(x=texture_mean+area_mean+smoothness_mean+concavity_mean, y=malignant)) +
+geom_point(alpha=.1) +
+geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) +
+labs(title = "Improved Logistic Model", y = "0=Ben,1=Mal", x= "Texture+Area+Smoothness+Concavity")
+
+log_improved
+
+reglog_improved <- glm(malignant~ texture_mean+area_mean+smoothness_mean+concavity_mean, family=binomial, cancer)
+
+# Summary table of the full model
+summary(reglog_improved)
+
+# Interpretation of slope coefficients in terms of odds
+exp(coefficients(reglog_improved))
+
+
+
+```
+
+The equation of this model is:
+log(π/(1-π)) = -30.8875 + 0.3817(texture) + 0.0152(area) + 119.5156(smoothness)  + 19.3929(concavity)
+
+
+All the predictors are very significant at the a=.15 level.
+
+
+To interpret the new odds, after holding all other predictors constant:
+
+A 1 stdev(grayscale) increase in mean texture increases the odds of the cell being malignant by a factor of 1.4648.
+
+A 1 µm^2 increase in mean area of the cell increases the odds of the cell being malignant by a factor of 1.0153.
+
+A 1 var(radius length) increase in mean smoothness variance increases the odds of the cell being malignant by a factor of 8.035e+51.
+
+A 1 severity of contour increase in mean concavity increases the odds of the cell being malignant by a factor of 2.644e+8.
+
+
+Notably, the interpretation of odds for each individual have increased in magnitude significantly. 
+
+##7. Statistical Model Quality
+```{r RP3.7}
+reglog_full$deviance
+reglog_improved$deviance
+
+logLik(reglog_full)
+logLik(reglog_improved)
+
+AIC(reglog_full)
+AIC(reglog_improved)
+
+pseudoR2full <- 1 - reglog_full$deviance/reglog_full$null.deviance
+pseudoR2full
+pseudoR2improved <- 1 - reglog_improved$deviance/reglog_improved$null.deviance
+pseudoR2improved
+```
+
+Transitioning from the full model to the improved one, there seems to be a significant increase in AIC (171.9614 to 168.1136), at moderate costs to both deviance (155.9614 to 158.1136) and log likelihood (-77.9807 to -79.0568), with only minimal impact on the pseudo R^2 value (0.7924 to 0.7896).
+
+Overall, the improved model appears to be a significant improvement as it factors in the most significant variables in determining the logistic regression model, reducing the risk of overfitting to the noise in the data. In addition, many of the highly correlated predictors have also been removed as a result of the high p values from before. 
