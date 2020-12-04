@@ -1,0 +1,4 @@
+Statistical analysis of breat cancer cells (response), either malignant or benign, based on various cell physical properties and 
+metrics (predictors). For this model, a multiple logistic regression in combination with single predictor logistic regression models 
+articulates the most significant properties of cells that affects the cancer state. These are texture, area, smoothness, and concavity. 
+In addition is a correlation matrix, univariate and bivariate analyses, and model quality metrics.
